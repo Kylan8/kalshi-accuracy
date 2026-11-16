@@ -3,50 +3,46 @@ import requests
 import time
 from datetime import datetime, timezone
 
-url = "https://api.elections.kalshi.com/trade-api/v2"
-params = {"limit": 100, "status": "settled", "mve_filter": "exclude", "series_ticker": "KXGOLD15M"}
+class KalshiClient:
+    BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
-all_markets = []
+    def __init__(self):
+        self.session = requests.Session()
 
-while True:
-    time.sleep(0.2)
-    resp = requests.get(f"{url}/markets", params=params)
-    data = resp.json()
+    
+    def get_markets(self, series_ticker, page_size=100, status="settled", max_markets=500):
+        params = {"limit": page_size, "status": status, "mve_filter": "exclude", "series_ticker": series_ticker}
+        all_markets = []
 
-    all_markets.extend(data["markets"])
+        while True:
+            time.sleep(0.2)
+            resp = self.session.get(f"{self.BASE_URL}/markets", params=params)
+            resp.raise_for_status()
+            data = resp.json()
 
-    curr_cursor = data["cursor"]
+            all_markets.extend(data["markets"])
 
-    if not curr_cursor:
-        break
+            curr_cursor = data["cursor"]
 
-    if len(all_markets) >= 500:
-        break
+            if not curr_cursor:
+                break
 
-    params["cursor"] = curr_cursor
+            if len(all_markets) >= max_markets:
+                break
 
-df = pd.DataFrame(all_markets)
-print(df.shape)
-print(df["result"].value_counts())
+            params["cursor"] = curr_cursor
 
-ticker = df.iloc[0]["ticker"]
-ticker_close_time = df.iloc[0]["close_time"]
-series_ticker = df.iloc[0]["event_ticker"].split('-', 1)[0]
+        return all_markets
 
-end_timestamp = int(pd.to_datetime(ticker_close_time).timestamp())
-start_timestamp = end_timestamp - 900
+    def get_candlesticks(self, series_ticker, ticker, start_ts, end_ts, period_interval=1):
+        
+        candlestick_url = f"/series/{series_ticker}/markets/{ticker}/candlesticks"
+        candlestick_request_params = {"period_interval": period_interval, "start_ts": start_ts, "end_ts": end_ts}
+    
+        candlestick_response = self.session.get(f"{self.BASE_URL}{candlestick_url}", params=candlestick_request_params)
 
-halfway_timestamp = (end_timestamp + start_timestamp) // 2
+        candlestick_response.raise_for_status()
+        candlestick_data = candlestick_response.json()
 
-candlestick_url = f"/series/{series_ticker}/markets/{ticker}/candlesticks"
-candlestick_request_params = {"period_interval": 1, "start_ts": halfway_timestamp - 60, "end_ts": halfway_timestamp}
-
-candlestick_response = requests.get(f"{url}{candlestick_url}", params=candlestick_request_params)
-candlestick_data = candlestick_response.json()
-
-end_unix_timestamp = candlestick_data["candlesticks"][0]["end_period_ts"]
-
-print(candlestick_data["candlesticks"][0]["yes_ask"], candlestick_data["candlesticks"][0]["yes_bid"])
-
-end_timestamp = datetime.fromtimestamp(end_unix_timestamp, tz=timezone.utc)
+        return candlestick_data["candlesticks"]
 
